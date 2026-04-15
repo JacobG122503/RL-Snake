@@ -194,11 +194,12 @@ def curses_menu(stdscr):
 def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
     curses.curs_set(0)
     curses.start_color()
-    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
     curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)
-    stdscr.bkgd(" ", curses.color_pair(4))
+    curses.init_pair(3, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(5, curses.COLOR_CYAN, curses.COLOR_BLACK)
+    stdscr.bkgd(" ", curses.color_pair(0))
     stdscr.nodelay(True)
     stdscr.timeout(1)
 
@@ -215,8 +216,20 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
             state = game.reset()
             total_reward = 0.0
             step = 0
+            skip_current_episode_render = False
 
             while True:
+                key = stdscr.getch()
+                if key != -1:
+                    if key in (ord("q"), ord("Q")):
+                        raise KeyboardInterrupt
+                    if key in (ord("s"), ord("S")):
+                        skip_current_episode_render = True
+                    if key in (curses.KEY_UP, 259):
+                        render_every = max(1, render_every - 1)
+                    if key in (curses.KEY_DOWN, 258):
+                        render_every = min(999, render_every + 1)
+
                 action = agent.act(state)
                 next_state, reward, done, score = game.step(action)
                 agent.remember(state, action, reward, next_state, done)
@@ -225,12 +238,14 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                 total_reward += reward
                 step += 1
 
-                if episode % render_every == 0:
+                should_render = episode % render_every == 0 and not skip_current_episode_render
+                if should_render:
                     stdscr.bkgdset(" ", curses.color_pair(4))
                     stdscr.erase()
                     fill_curses_background(stdscr, curses.color_pair(4))
                     h, w = stdscr.getmaxyx()
                     title = f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                    controls = f"[↑/↓]: show every {render_every} eps    [s]: skip this episode    [q]: quit"
                     try:
                         stdscr.move(0, 0)
                         stdscr.clrtoeol()
@@ -240,7 +255,8 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                         stdscr.clrtoeol()
                     except curses.error:
                         pass
-                    stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(3))
+                    stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(5))
+                    stdscr.addstr(1, max(0, (w - len(controls)) // 2), controls, curses.color_pair(4))
                     board = game.render_cells()
                     board_h = len(board)
                     board_w = len(board[0]) if board_h else 0
@@ -255,12 +271,14 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                             y = board_y + row_index
                             if y >= h - 2 or x >= w - 1:
                                 continue
-                            if cell == "H" or cell == "S":
-                                stdscr.addch(y, x, curses.ACS_CKBOARD, curses.color_pair(2 if cell == "S" else 1))
+                            if cell == "H":
+                                stdscr.addch(y, x, curses.ACS_CKBOARD, curses.color_pair(3))
+                            elif cell == "S":
+                                stdscr.addch(y, x, curses.ACS_CKBOARD, curses.color_pair(2))
                             elif cell == "A":
-                                stdscr.addch(y, x, curses.ACS_DIAMOND, curses.color_pair(3))
+                                stdscr.addch(y, x, curses.ACS_DIAMOND, curses.color_pair(4))
                             else:
-                                stdscr.addch(y, x, " ", curses.color_pair(4))
+                                stdscr.addch(y, x, " ", curses.color_pair(0))
                     status = f"Score: {score}  Step: {step}  Reward: {reward:.2f}"
                     try:
                         stdscr.move(h - 2, 0)
