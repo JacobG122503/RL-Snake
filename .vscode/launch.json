@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run RL Snake (external terminal)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/run.py",
+      "console": "externalTerminal",
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Train RL Snake",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/run.py",
+      "console": "externalTerminal",
+      "args": ["train", "--episodes", "800", "--render-every", "40"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Play RL Snake",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/run.py",
+      "console": "externalTerminal",
+      "args": ["play"],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
