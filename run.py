@@ -32,6 +32,31 @@ def launch_external_terminal(command):
         print(exc)
 
 
+def close_external_terminal():
+    if sys.platform != "darwin":
+        return
+    try:
+        script = 'tell application "Terminal" to close front window saving no'
+        subprocess.run(["osascript", "-e", script], check=True)
+    except Exception as exc:
+        print("Unable to close external Terminal window.")
+        print(exc)
+
+
+def center_text(lines):
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    cols, rows = size.columns, size.lines
+    top_padding = max(0, (rows - len(lines)) // 2)
+    centered = ["" for _ in range(top_padding)]
+    for line in lines:
+        if len(line) < cols:
+            pad = (cols - len(line)) // 2
+            centered.append(" " * pad + line)
+        else:
+            centered.append(line)
+    return "\n".join(centered)
+
+
 def get_console_size():
     size = shutil.get_terminal_size(fallback=(80, 24))
     width = max(20, size.columns - 2)
@@ -63,18 +88,28 @@ def retro_menu():
     clear_screen()
     meta = load_save_meta()
     episode_text = f"episode {meta['episode']}" if meta and meta.get("episode") is not None else "no save"
+    width = 46
+    border = "#" * width
+    empty = "#" + " " * (width - 2) + "#"
+    option3 = f"#  3) Clear save ({episode_text})"
+    option3 = option3.ljust(width - 1) + "#"
 
-    print("#############################################")
-    print("#                                           #")
-    print("#        RETRO RL SNAKE CONSOLE MODE        #")
-    print("#                                           #")
-    print("#  1) Play                                  #")
-    print("#  2) Train                                 #")
-    print(f"#  3) Clear save ({episode_text})" + " " * (35 - len(episode_text)) + "#")
-    print("#                                           #")
-    print("#############################################")
-    print()
-    return input("Select 1-3: ").strip()
+    lines = [
+        border,
+        empty,
+        "#        RETRO RL SNAKE CONSOLE MODE        #",
+        empty,
+        "#  1) Play                                  #",
+        "#  2) Train                                 #",
+        option3,
+        empty,
+        border,
+        "",
+        "Select 1-3: ",
+    ]
+    menu_text = center_text(lines)
+    print(menu_text, end="")
+    return input().strip()
 
 
 def print_board(game, episode, step, reward, score, epsilon):
@@ -88,6 +123,7 @@ def print_board(game, episode, step, reward, score, epsilon):
 
 
 def train(agent, episodes=800, render_every=40, delay=0.05):
+    episode = 0
     width, height = get_console_size()
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
     best_score = 0
@@ -136,6 +172,11 @@ def play():
 
     def main(stdscr):
         curses.curs_set(0)
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_RED, -1)
+        curses.init_pair(2, curses.COLOR_GREEN, -1)
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)
         stdscr.nodelay(True)
         stdscr.timeout(120)
 
@@ -152,11 +193,21 @@ def play():
             stdscr.addstr(0, 0, "RETRO RL SNAKE - q to quit")
             stdscr.addstr(1, 0, f"Score: {score}")
 
-            board = game.render().split("\n")
-            for index, row in enumerate(board, start=3):
-                if index >= play_height - 1:
+            board = game.render_cells()
+            for row_index, row in enumerate(board):
+                if 3 + row_index >= play_height - 1:
                     break
-                stdscr.addstr(index, 0, row[:play_width - 1])
+                for col_index, cell in enumerate(row):
+                    if col_index >= play_width - 1:
+                        break
+                    if cell == "H":
+                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(1))
+                    elif cell == "S":
+                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(2))
+                    elif cell == "A":
+                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(3))
+                    else:
+                        stdscr.addstr(3 + row_index, col_index, " ")
 
             stdscr.refresh()
             try:
@@ -244,11 +295,17 @@ def main():
             print("Invalid selection. Press Enter to try again.")
             input()
 
-    if args.mode == "train":
-        agent = DQNAgent()
-        train(agent, episodes=args.episodes, render_every=args.render_every)
-    else:
-        play()
+    try:
+        if args.mode == "train":
+            agent = DQNAgent()
+            train(agent, episodes=args.episodes, render_every=args.render_every)
+        else:
+            play()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if args.external and sys.platform == "darwin":
+            close_external_terminal()
 
 
 if __name__ == "__main__":

@@ -101,19 +101,32 @@ class SnakeGame:
             apple_down,
         ]
 
-    def render(self):
+    def render_cells(self):
         grid = [[" " for _ in range(self.width)] for _ in range(self.height)]
-        for x, y in self.snake:
+        for x, y in list(self.snake)[1:]:
             grid[y][x] = "S"
-        ax, ay = self.apple
-        grid[ay][ax] = "A"
         head_x, head_y = self.snake[0]
         grid[head_y][head_x] = "H"
+        ax, ay = self.apple
+        grid[ay][ax] = "A"
+        return grid
 
+    def render(self):
+        cells = self.render_cells()
         top_bottom = "#" * (self.width + 2)
         rows = [top_bottom]
-        for row in grid:
-            rows.append("#" + "".join(row) + "#")
+        for row in cells:
+            rendered = ""
+            for cell in row:
+                if cell == "H":
+                    rendered += "\x1b[31m■\x1b[0m"
+                elif cell == "S":
+                    rendered += "\x1b[32m■\x1b[0m"
+                elif cell == "A":
+                    rendered += "\x1b[33m■\x1b[0m"
+                else:
+                    rendered += " "
+            rows.append("#" + rendered + "#")
         rows.append(top_bottom)
         return "\n".join(rows)
 
