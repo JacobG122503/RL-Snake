@@ -77,10 +77,11 @@ def get_console_size():
 
 def fill_curses_background(stdscr, color_pair):
     h, w = stdscr.getmaxyx()
-    blank = " " * max(1, w)
+    stdscr.bkgdset(" ", color_pair)
     for row in range(h):
         try:
-            stdscr.addstr(row, 0, blank, color_pair)
+            stdscr.move(row, 0)
+            stdscr.clrtoeol()
         except curses.error:
             pass
 
@@ -230,12 +231,21 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                     fill_curses_background(stdscr, curses.color_pair(4))
                     h, w = stdscr.getmaxyx()
                     title = f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                    try:
+                        stdscr.move(0, 0)
+                        stdscr.clrtoeol()
+                        stdscr.move(1, 0)
+                        stdscr.clrtoeol()
+                        stdscr.move(2, 0)
+                        stdscr.clrtoeol()
+                    except curses.error:
+                        pass
                     stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(3))
                     board = game.render_cells()
                     board_h = len(board)
                     board_w = len(board[0]) if board_h else 0
                     board_x = max(2, (w - board_w) // 2)
-                    board_y = 2
+                    board_y = 3
                     draw_box(stdscr, board_y - 1, board_x - 1, board_h + 2, board_w + 2, curses.color_pair(1))
                     for row_index, row in enumerate(board):
                         if row_index >= board_h:
@@ -245,15 +255,18 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                             y = board_y + row_index
                             if y >= h - 2 or x >= w - 1:
                                 continue
-                            if cell == "H":
-                                stdscr.addch(y, x, "O", curses.color_pair(1))
-                            elif cell == "S":
-                                stdscr.addch(y, x, "o", curses.color_pair(2))
+                            if cell == "H" or cell == "S":
+                                stdscr.addch(y, x, curses.ACS_CKBOARD, curses.color_pair(2 if cell == "S" else 1))
                             elif cell == "A":
-                                stdscr.addch(y, x, "*", curses.color_pair(3))
+                                stdscr.addch(y, x, curses.ACS_DIAMOND, curses.color_pair(3))
                             else:
                                 stdscr.addch(y, x, " ", curses.color_pair(4))
                     status = f"Score: {score}  Step: {step}  Reward: {reward:.2f}"
+                    try:
+                        stdscr.move(h - 2, 0)
+                        stdscr.clrtoeol()
+                    except curses.error:
+                        pass
                     stdscr.addstr(h - 2, 1, status[: max(0, w - 2)], curses.color_pair(4))
                     stdscr.refresh()
                     time.sleep(delay)
@@ -265,7 +278,12 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                 avg_score = np.mean([s for _, s, _ in stats[-20:]])
                 summary = f"Episode {episode}/{episodes}: avg {avg_score:.2f}, best {best_score}, eps {agent.epsilon:.3f}"
                 _, w = stdscr.getmaxyx()
-                stdscr.addstr(1, 1, summary[:w-2], curses.color_pair(4))
+                try:
+                    stdscr.move(1, 0)
+                    stdscr.clrtoeol()
+                except curses.error:
+                    pass
+                stdscr.addstr(1, max(0, (w - len(summary)) // 2), summary[: w - 2], curses.color_pair(4))
                 stdscr.refresh()
     except KeyboardInterrupt:
         pass
@@ -298,13 +316,25 @@ def curses_play(stdscr):
         stdscr.erase()
         fill_curses_background(stdscr, curses.color_pair(4))
         title = "RL SNAKE - q to quit"
+        try:
+            stdscr.move(0, 0)
+            stdscr.clrtoeol()
+            stdscr.move(1, 0)
+            stdscr.clrtoeol()
+        except curses.error:
+            pass
         stdscr.addstr(0, max(0, (play_width - len(title)) // 2), title, curses.color_pair(3))
         stdscr.addstr(1, 1, f"Score: {score}"[: max(0, play_width - 2)], curses.color_pair(4))
         board = game.render_cells()
         board_h = len(board)
         board_w = len(board[0]) if board_h else 0
         board_x = max(2, (play_width - board_w) // 2)
-        board_y = 2
+        board_y = 3
+        try:
+            stdscr.move(2, 0)
+            stdscr.clrtoeol()
+        except curses.error:
+            pass
         draw_box(stdscr, board_y - 1, board_x - 1, board_h + 2, board_w + 2, curses.color_pair(1))
 
         for row_index, row in enumerate(board):
@@ -313,12 +343,10 @@ def curses_play(stdscr):
                 y = board_y + row_index
                 if y >= play_height - 1 or x >= play_width - 1:
                     continue
-                if cell == "H":
-                    stdscr.addch(y, x, "O", curses.color_pair(1))
-                elif cell == "S":
-                    stdscr.addch(y, x, "o", curses.color_pair(2))
+                if cell == "H" or cell == "S":
+                    stdscr.addch(y, x, curses.ACS_CKBOARD, curses.color_pair(2 if cell == "S" else 1))
                 elif cell == "A":
-                    stdscr.addch(y, x, "*", curses.color_pair(3))
+                    stdscr.addch(y, x, curses.ACS_DIAMOND, curses.color_pair(3))
                 else:
                     stdscr.addch(y, x, " ", curses.color_pair(4))
 
