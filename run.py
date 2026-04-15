@@ -1,9 +1,11 @@
 import argparse
+import curses
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import numpy as np
@@ -25,7 +27,16 @@ def clear_screen():
 
 def launch_external_terminal(command):
     try:
-        script = f'tell application "Terminal" to activate\n tell application "Terminal" to do script "{command}"'
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".sh") as wrapper:
+            wrapper.write("#!/bin/sh\n")
+            wrapper.write("set -e\n")
+            wrapper.write(command + "\n")
+            wrapper.write("osascript -e 'tell application \"Terminal\" to close front window saving no'\n")
+            wrapper.write('rm -- "$0"\n')
+            wrapper_path = wrapper.name
+
+        os.chmod(wrapper_path, 0o755)
+        script = f'tell application "Terminal" to activate\n tell application "Terminal" to do script "/bin/sh {shlex.quote(wrapper_path)}"'
         subprocess.run(["osascript", "-e", script], check=True)
     except Exception as exc:
         print("Unable to launch external Terminal. Running in current terminal instead.")
@@ -36,8 +47,8 @@ def close_external_terminal():
     if sys.platform != "darwin":
         return
     try:
-        script = 'tell application "Terminal" to close front window saving no'
-        subprocess.run(["osascript", "-e", script], check=True)
+        script = 'delay 0.2\n tell application "Terminal" to close front window saving no'
+        subprocess.Popen(["osascript", "-e", script])
     except Exception as exc:
         print("Unable to close external Terminal window.")
         print(exc)
@@ -64,6 +75,21 @@ def get_console_size():
     return width, height
 
 
+def fill_curses_background(stdscr, color_pair):
+    h, w = stdscr.getmaxyx()
+    blank = " " * max(1, w - 1)
+    for row in range(h):
+        try:
+            stdscr.addstr(row, 0, blank, color_pair)
+        except curses.error:
+            pass
+        if w > 1:
+            try:
+                stdscr.addch(row, w - 1, " ", color_pair)
+            except curses.error:
+                pass
+
+
 def load_save_meta(filename="dqn_snake.npz"):
     if not os.path.exists(filename):
         return None
@@ -84,42 +110,221 @@ def clear_save(filename="dqn_snake.npz"):
         pass
 
 
-def retro_menu():
-    clear_screen()
+def curses_menu(stdscr):
+    curses.curs_set(0)
+    curses.start_color()
+    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
+    stdscr.bkgd(" ", curses.color_pair(1))
+    stdscr.clear()
     meta = load_save_meta()
     episode_text = f"episode {meta['episode']}" if meta and meta.get("episode") is not None else "no save"
-    width = 46
-    border = "#" * width
-    empty = "#" + " " * (width - 2) + "#"
-    option3 = f"#  3) Clear save ({episode_text})"
-    option3 = option3.ljust(width - 1) + "#"
-
-    lines = [
-        border,
-        empty,
-        "#        RETRO RL SNAKE CONSOLE MODE        #",
-        empty,
-        "#  1) Play                                  #",
-        "#  2) Train                                 #",
-        option3,
-        empty,
-        border,
+    raw_lines = [
         "",
-        "Select 1-3: ",
+        "RL SNAKE",
+        "",
+        "1) Play",
+        "2) Train",
+        f"3) Clear save ({episode_text})",
+        "",
+        "Press 1, 2, or 3 to choose.",
     ]
-    menu_text = center_text(lines)
-    print(menu_text, end="")
-    return input().strip()
+    inner_width = max(len(line) for line in raw_lines)
+    box_width = inner_width + 4
+    lines = [
+        "#" * box_width,
+        "#" + " " * (box_width - 2) + "#",
+    ]
+    for idx, raw in enumerate(raw_lines):
+        padded = raw.center(inner_width)
+        lines.append("# " + padded + " #")
+        if idx in (0, 2, 6):
+            lines.append("#" + " " * (box_width - 2) + "#")
+    lines.append("#" * box_width)
+
+    while True:
+        stdscr.bkgd(" ", curses.color_pair(1))
+        stdscr.clear()
+        fill_curses_background(stdscr, curses.color_pair(1))
+        stdscr.refresh()
+        h, w = stdscr.getmaxyx()
+        start_y = max(0, (h - len(lines)) // 2)
+        start_x = max(0, (w - box_width) // 2)
+
+        for idx, line in enumerate(lines):
+            y = start_y + idx
+            if y < 0 or y >= h:
+                continue
+            if idx == 0 or idx == len(lines) - 1 or line == "#" + " " * (box_width - 2) + "#":
+                stdscr.addstr(y, start_x, line, curses.color_pair(1))
+            else:
+                inner = line[2:-2]
+                if idx == 2:
+                    text_color = curses.color_pair(3)
+                elif idx in (4, 5, 6):
+                    text_color = curses.color_pair(2)
+                else:
+                    text_color = curses.color_pair(1)
+                stdscr.addstr(y, start_x, "# ", curses.color_pair(1))
+                stdscr.addstr(y, start_x + 2, inner, text_color)
+                stdscr.addstr(y, start_x + box_width - 2, " #", curses.color_pair(1))
+        stdscr.refresh()
+        key = stdscr.getch()
+        if key in (ord("1"), ord("2"), ord("3")):
+            return chr(key)
+        if key == ord("q"):
+            return "q"
 
 
-def print_board(game, episode, step, reward, score, epsilon):
-    clear_screen()
-    print("#############################################")
-    print(f"# TRAINING MODE  | Episode {episode} | Eps {epsilon:.3f} #")
-    print("#############################################")
-    print(game.render())
-    print(f"Score: {score}   Step: {step}   Reward: {reward:.2f}")
-    print()
+def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    stdscr.bkgd(" ", curses.color_pair(4))
+    stdscr.nodelay(True)
+    stdscr.timeout(1)
+
+    width, height = get_console_size()
+    game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
+    best_score = 0
+    stats = []
+    episode = 0
+
+    try:
+        for episode in range(1, episodes + 1):
+            state = game.reset()
+            total_reward = 0.0
+            step = 0
+
+            while True:
+                action = agent.act(state)
+                next_state, reward, done, score = game.step(action)
+                agent.remember(state, action, reward, next_state, done)
+                agent.replay(batch_size=64)
+                state = next_state
+                total_reward += reward
+                step += 1
+
+                if episode % render_every == 0:
+                    stdscr.bkgdset(" ", curses.color_pair(4))
+                    stdscr.erase()
+                    fill_curses_background(stdscr, curses.color_pair(4))
+                    h, w = stdscr.getmaxyx()
+                    title = f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                    stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(3))
+                    board = game.render_cells()
+                    for row_index, row in enumerate(board):
+                        if 2 + row_index >= h - 2:
+                            break
+                        for col_index, cell in enumerate(row):
+                            if col_index >= w - 2:
+                                break
+                            if cell == "H":
+                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_CKBOARD, curses.color_pair(1))
+                            elif cell == "S":
+                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_CKBOARD, curses.color_pair(2))
+                            elif cell == "A":
+                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_DIAMOND, curses.color_pair(3))
+                            else:
+                                stdscr.addch(2 + row_index, col_index + 1, " ", curses.color_pair(4))
+                    status = f"Score: {score}  Step: {step}  Reward: {reward:.2f}"
+                    stdscr.addstr(h - 2, max(0, (w - len(status)) // 2), status, curses.color_pair(4))
+                    stdscr.refresh()
+                    time.sleep(delay)
+                if done:
+                    stats.append((episode, score, total_reward))
+                    best_score = max(best_score, score)
+                    break
+            if episode % 20 == 0:
+                avg_score = np.mean([s for _, s, _ in stats[-20:]])
+                summary = f"Episode {episode}/{episodes}: avg {avg_score:.2f}, best {best_score}, eps {agent.epsilon:.3f}"
+                _, w = stdscr.getmaxyx()
+                stdscr.addstr(1, 1, summary[:w-2], curses.color_pair(4))
+                stdscr.refresh()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        agent.save(episode=episode)
+
+
+def curses_play(stdscr):
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(4, curses.COLOR_WHITE, curses.COLOR_BLACK)
+    stdscr.bkgd(" ", curses.color_pair(4))
+    stdscr.nodelay(True)
+    stdscr.timeout(100)
+
+    play_height, play_width = stdscr.getmaxyx()
+    game_width = max(20, play_width - 2)
+    game_height = max(12, play_height - 6)
+    game = SnakeGame(width=game_width, height=game_height, max_steps=game_width * game_height * 4)
+    state = game.reset()
+    score = 0
+    action = 0
+
+    while True:
+        stdscr.bkgdset(" ", curses.color_pair(4))
+        stdscr.erase()
+        fill_curses_background(stdscr, curses.color_pair(4))
+        title = "RL SNAKE - q to quit"
+        stdscr.addstr(0, max(0, (play_width - len(title)) // 2), title, curses.color_pair(3))
+        stdscr.addstr(1, 0, f"Score: {score}", curses.color_pair(4))
+
+        board = game.render_cells()
+        for row_index, row in enumerate(board):
+            if 3 + row_index >= play_height - 1:
+                break
+            for col_index, cell in enumerate(row):
+                if col_index >= play_width - 1:
+                    break
+                if cell == "H":
+                    stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(1))
+                elif cell == "S":
+                    stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(2))
+                elif cell == "A":
+                    stdscr.addch(3 + row_index, col_index, curses.ACS_DIAMOND, curses.color_pair(3))
+                else:
+                    stdscr.addch(3 + row_index, col_index, " ", curses.color_pair(4))
+
+        stdscr.refresh()
+
+        try:
+            key = stdscr.getch()
+        except KeyboardInterrupt:
+            break
+
+        if key == ord("q"):
+            break
+        if key in KEY_BINDINGS:
+            action = KEY_BINDINGS[key]
+
+        _, _, done, score = game.play_step(action)
+        if done:
+            game_over = "Game over. Press r to restart or q to quit."
+            stdscr.addstr(min(play_height - 2, len(board) + 4), 0, game_over[:play_width - 1], curses.color_pair(4))
+            stdscr.refresh()
+            while True:
+                key = stdscr.getch()
+                if key == ord("q"):
+                    return
+                if key == ord("r"):
+                    game = SnakeGame(width=game_width, height=game_height, max_steps=game_width * game_height * 4)
+                    state = game.reset()
+                    score = 0
+                    action = 0
+                    break
 
 
 def train(agent, episodes=800, render_every=40, delay=0.05):
@@ -190,7 +395,7 @@ def play():
 
         while True:
             stdscr.clear()
-            stdscr.addstr(0, 0, "RETRO RL SNAKE - q to quit")
+            stdscr.addstr(0, 0, "RL SNAKE - q to quit")
             stdscr.addstr(1, 0, f"Score: {score}")
 
             board = game.render_cells()
@@ -201,13 +406,13 @@ def play():
                     if col_index >= play_width - 1:
                         break
                     if cell == "H":
-                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(1))
+                        stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(1))
                     elif cell == "S":
-                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(2))
+                        stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(2))
                     elif cell == "A":
-                        stdscr.addstr(3 + row_index, col_index, "■", curses.color_pair(3))
+                        stdscr.addch(3 + row_index, col_index, curses.ACS_DIAMOND, curses.color_pair(3))
                     else:
-                        stdscr.addstr(3 + row_index, col_index, " ")
+                        stdscr.addch(3 + row_index, col_index, " ")
 
             stdscr.refresh()
             try:
@@ -274,38 +479,28 @@ def main():
             external_cmd.extend(["--seed", str(args.seed)])
         external_cmd.append("--external")
         project_dir = os.path.dirname(os.path.abspath(__file__))
-        command_str = "cd " + shlex.quote(project_dir) + " && exec " + " ".join(external_cmd)
+        command_str = "cd " + shlex.quote(project_dir) + " && " + " ".join(external_cmd)
+        command_str += "; osascript -e 'tell application \"Terminal\" to close front window saving no'"
         launch_external_terminal(command_str)
         return
 
     if args.mode is None:
-        while True:
-            selection = retro_menu()
-            if selection == "1":
-                args.mode = "play"
-                break
-            if selection == "2":
-                args.mode = "train"
-                break
-            if selection == "3":
-                clear_save()
-                print("Save cleared. Press Enter to return to menu.")
-                input()
-                continue
-            print("Invalid selection. Press Enter to try again.")
-            input()
+        selection = curses.wrapper(curses_menu)
+        if selection == "q":
+            return
+        if selection == "1":
+            args.mode = "play"
+        elif selection == "2":
+            args.mode = "train"
+        elif selection == "3":
+            clear_save()
+            return main()
 
-    try:
-        if args.mode == "train":
-            agent = DQNAgent()
-            train(agent, episodes=args.episodes, render_every=args.render_every)
-        else:
-            play()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if args.external and sys.platform == "darwin":
-            close_external_terminal()
+    if args.mode == "train":
+        agent = DQNAgent()
+        curses.wrapper(curses_train, agent, args.episodes, args.render_every)
+    else:
+        curses.wrapper(curses_play)
 
 
 if __name__ == "__main__":
