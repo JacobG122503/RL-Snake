@@ -77,17 +77,28 @@ def get_console_size():
 
 def fill_curses_background(stdscr, color_pair):
     h, w = stdscr.getmaxyx()
-    blank = " " * max(1, w - 1)
+    blank = " " * max(1, w)
     for row in range(h):
         try:
             stdscr.addstr(row, 0, blank, color_pair)
         except curses.error:
             pass
-        if w > 1:
-            try:
-                stdscr.addch(row, w - 1, " ", color_pair)
-            except curses.error:
-                pass
+
+
+def draw_box(stdscr, top, left, height, width, color_pair):
+    if width < 2 or height < 2:
+        return
+    try:
+        stdscr.addch(top, left, curses.ACS_ULCORNER, color_pair)
+        stdscr.hline(top, left + 1, curses.ACS_HLINE, width - 2, color_pair)
+        stdscr.addch(top, left + width - 1, curses.ACS_URCORNER, color_pair)
+        stdscr.vline(top + 1, left, curses.ACS_VLINE, height - 2, color_pair)
+        stdscr.vline(top + 1, left + width - 1, curses.ACS_VLINE, height - 2, color_pair)
+        stdscr.addch(top + height - 1, left, curses.ACS_LLCORNER, color_pair)
+        stdscr.hline(top + height - 1, left + 1, curses.ACS_HLINE, width - 2, color_pair)
+        stdscr.addch(top + height - 1, left + width - 1, curses.ACS_LRCORNER, color_pair)
+    except curses.error:
+        pass
 
 
 def load_save_meta(filename="dqn_snake.npz"):
@@ -182,7 +193,6 @@ def curses_menu(stdscr):
 def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
     curses.curs_set(0)
     curses.start_color()
-    curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
     curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
     curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
@@ -191,7 +201,9 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
     stdscr.nodelay(True)
     stdscr.timeout(1)
 
-    width, height = get_console_size()
+    h, w = stdscr.getmaxyx()
+    width = max(20, w - 4)
+    height = max(12, h - 6)
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
     best_score = 0
     stats = []
@@ -220,22 +232,29 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                     title = f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
                     stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(3))
                     board = game.render_cells()
+                    board_h = len(board)
+                    board_w = len(board[0]) if board_h else 0
+                    board_x = max(2, (w - board_w) // 2)
+                    board_y = 2
+                    draw_box(stdscr, board_y - 1, board_x - 1, board_h + 2, board_w + 2, curses.color_pair(1))
                     for row_index, row in enumerate(board):
-                        if 2 + row_index >= h - 2:
+                        if row_index >= board_h:
                             break
                         for col_index, cell in enumerate(row):
-                            if col_index >= w - 2:
-                                break
+                            x = board_x + col_index
+                            y = board_y + row_index
+                            if y >= h - 2 or x >= w - 1:
+                                continue
                             if cell == "H":
-                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_CKBOARD, curses.color_pair(1))
+                                stdscr.addch(y, x, "O", curses.color_pair(1))
                             elif cell == "S":
-                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_CKBOARD, curses.color_pair(2))
+                                stdscr.addch(y, x, "o", curses.color_pair(2))
                             elif cell == "A":
-                                stdscr.addch(2 + row_index, col_index + 1, curses.ACS_DIAMOND, curses.color_pair(3))
+                                stdscr.addch(y, x, "*", curses.color_pair(3))
                             else:
-                                stdscr.addch(2 + row_index, col_index + 1, " ", curses.color_pair(4))
+                                stdscr.addch(y, x, " ", curses.color_pair(4))
                     status = f"Score: {score}  Step: {step}  Reward: {reward:.2f}"
-                    stdscr.addstr(h - 2, max(0, (w - len(status)) // 2), status, curses.color_pair(4))
+                    stdscr.addstr(h - 2, 1, status[: max(0, w - 2)], curses.color_pair(4))
                     stdscr.refresh()
                     time.sleep(delay)
                 if done:
@@ -257,7 +276,6 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
 def curses_play(stdscr):
     curses.curs_set(0)
     curses.start_color()
-    curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
     curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
     curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
@@ -267,7 +285,7 @@ def curses_play(stdscr):
     stdscr.timeout(100)
 
     play_height, play_width = stdscr.getmaxyx()
-    game_width = max(20, play_width - 2)
+    game_width = max(20, play_width - 4)
     game_height = max(12, play_height - 6)
     game = SnakeGame(width=game_width, height=game_height, max_steps=game_width * game_height * 4)
     state = game.reset()
@@ -275,28 +293,34 @@ def curses_play(stdscr):
     action = 0
 
     while True:
+        play_height, play_width = stdscr.getmaxyx()
         stdscr.bkgdset(" ", curses.color_pair(4))
         stdscr.erase()
         fill_curses_background(stdscr, curses.color_pair(4))
         title = "RL SNAKE - q to quit"
         stdscr.addstr(0, max(0, (play_width - len(title)) // 2), title, curses.color_pair(3))
-        stdscr.addstr(1, 0, f"Score: {score}", curses.color_pair(4))
-
+        stdscr.addstr(1, 1, f"Score: {score}"[: max(0, play_width - 2)], curses.color_pair(4))
         board = game.render_cells()
+        board_h = len(board)
+        board_w = len(board[0]) if board_h else 0
+        board_x = max(2, (play_width - board_w) // 2)
+        board_y = 2
+        draw_box(stdscr, board_y - 1, board_x - 1, board_h + 2, board_w + 2, curses.color_pair(1))
+
         for row_index, row in enumerate(board):
-            if 3 + row_index >= play_height - 1:
-                break
             for col_index, cell in enumerate(row):
-                if col_index >= play_width - 1:
-                    break
+                x = board_x + col_index
+                y = board_y + row_index
+                if y >= play_height - 1 or x >= play_width - 1:
+                    continue
                 if cell == "H":
-                    stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(1))
+                    stdscr.addch(y, x, "O", curses.color_pair(1))
                 elif cell == "S":
-                    stdscr.addch(3 + row_index, col_index, curses.ACS_CKBOARD, curses.color_pair(2))
+                    stdscr.addch(y, x, "o", curses.color_pair(2))
                 elif cell == "A":
-                    stdscr.addch(3 + row_index, col_index, curses.ACS_DIAMOND, curses.color_pair(3))
+                    stdscr.addch(y, x, "*", curses.color_pair(3))
                 else:
-                    stdscr.addch(3 + row_index, col_index, " ", curses.color_pair(4))
+                    stdscr.addch(y, x, " ", curses.color_pair(4))
 
         stdscr.refresh()
 
