@@ -231,6 +231,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
     stats = []
     max_episodes = None if episodes <= 0 else episodes
     episode = start_episode
+    efficiency_mode = False
 
     try:
         status_shown = False
@@ -254,6 +255,11 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                         raise KeyboardInterrupt
                     if key in (ord("s"), ord("S")):
                         skip_current_episode_render = True
+                        status_shown = False
+                    if key in (ord("e"), ord("E")):
+                        efficiency_mode = not efficiency_mode
+                        skip_current_episode_render = False
+                        status_shown = False
                     if key in (curses.KEY_UP, 259):
                         render_every = max(1, render_every - 1)
                         status_shown = False
@@ -261,7 +267,25 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                         render_every = min(999, render_every + 1)
                         status_shown = False
 
-                if skip_current_episode_render or episode % render_every != 0:
+                if efficiency_mode:
+                    if not status_shown:
+                        h, w = stdscr.getmaxyx()
+                        title = f"TRAINING EFFICIENCY MODE | Episode {episode}"
+                        status = f"[e]: normal mode    [q]: quit"
+                        stdscr.erase()
+                        fill_curses_background(stdscr, curses.color_pair(0))
+                        try:
+                            stdscr.move(0, 0)
+                            stdscr.clrtoeol()
+                            stdscr.move(1, 0)
+                            stdscr.clrtoeol()
+                        except curses.error:
+                            pass
+                        stdscr.addstr(0, max(0, (w - len(title)) // 2), title[: max(0, w - 1)], curses.color_pair(5))
+                        stdscr.addstr(1, max(0, (w - len(status)) // 2), status[: max(0, w - 1)], curses.color_pair(4))
+                        stdscr.refresh()
+                        status_shown = True
+                elif skip_current_episode_render:
                     if not status_shown:
                         h, w = stdscr.getmaxyx()
                         title = (
@@ -269,7 +293,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                             if max_episodes
                             else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
                         )
-                        status = f"(skipped) show every {render_every} eps | s skip this episode | q quit"
+                        status = f"(skipped) [e]: efficiency mode    [q]: quit"
                         try:
                             stdscr.move(0, 0)
                             stdscr.clrtoeol()
@@ -290,7 +314,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                 total_reward += reward
                 step += 1
 
-                should_render = episode % render_every == 0 and not skip_current_episode_render
+                should_render = not efficiency_mode and not skip_current_episode_render
                 if should_render:
                     stdscr.bkgdset(" ", curses.color_pair(4))
                     stdscr.erase()
@@ -301,7 +325,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                         if max_episodes
                         else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
                     )
-                    controls = f"[↑/↓]: show every {render_every} eps    [s]: skip this episode    [q]: quit"
+                    controls = f"[e]: efficiency mode    [s]: skip this episode    [q]: quit"
                     try:
                         stdscr.move(0, 0)
                         stdscr.clrtoeol()
