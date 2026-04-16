@@ -102,6 +102,26 @@ def draw_box(stdscr, top, left, height, width, color_pair):
         pass
 
 
+def flash_head(stdscr, board, board_x, board_y, head_color):
+    h, w = stdscr.getmaxyx()
+    for flash in range(4):
+        color = curses.color_pair(3) if flash % 2 == 0 else head_color
+        for row_index, row in enumerate(board):
+            for col_index, cell in enumerate(row):
+                if cell != "H":
+                    continue
+                x = board_x + col_index
+                y = board_y + row_index
+                if y >= h - 2 or x >= w - 1:
+                    continue
+                try:
+                    stdscr.addch(y, x, curses.ACS_CKBOARD, color)
+                except curses.error:
+                    pass
+        stdscr.refresh()
+        time.sleep(0.06)
+
+
 def load_save_meta(filename="dqn_snake.npz"):
     if not os.path.exists(filename):
         return None
@@ -191,7 +211,7 @@ def curses_menu(stdscr):
             return "q"
 
 
-def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
+def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_episode=1):
     curses.curs_set(0)
     curses.start_color()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)
@@ -209,14 +229,23 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
     best_score = 0
     stats = []
-    episode = 0
+    max_episodes = None if episodes <= 0 else episodes
+    episode = start_episode
 
     try:
-        for episode in range(1, episodes + 1):
+        status_shown = False
+        prev_render_every = render_every
+        while max_episodes is None or episode <= max_episodes:
             state = game.reset()
             total_reward = 0.0
             step = 0
             skip_current_episode_render = False
+            status_shown = False
+            board = game.render_cells()
+            board_h = len(board)
+            board_w = len(board[0]) if board_h else 0
+            board_x = max(2, (w - board_w) // 2)
+            board_y = 3
 
             while True:
                 key = stdscr.getch()
@@ -227,8 +256,31 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                         skip_current_episode_render = True
                     if key in (curses.KEY_UP, 259):
                         render_every = max(1, render_every - 1)
+                        status_shown = False
                     if key in (curses.KEY_DOWN, 258):
                         render_every = min(999, render_every + 1)
+                        status_shown = False
+
+                if skip_current_episode_render or episode % render_every != 0:
+                    if not status_shown:
+                        h, w = stdscr.getmaxyx()
+                        title = (
+                            f"TRAINING MODE | Episode {episode}/{max_episodes} | Eps {agent.epsilon:.3f}"
+                            if max_episodes
+                            else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                        )
+                        status = f"(skipped) show every {render_every} eps | s skip this episode | q quit"
+                        try:
+                            stdscr.move(0, 0)
+                            stdscr.clrtoeol()
+                            stdscr.move(1, 0)
+                            stdscr.clrtoeol()
+                        except curses.error:
+                            pass
+                        stdscr.addstr(0, max(0, (w - len(title)) // 2), title[: max(0, w - 1)], curses.color_pair(5))
+                        stdscr.addstr(1, max(0, (w - len(status)) // 2), status[: max(0, w - 1)], curses.color_pair(4))
+                        stdscr.refresh()
+                        status_shown = True
 
                 action = agent.act(state)
                 next_state, reward, done, score = game.step(action)
@@ -244,7 +296,11 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                     stdscr.erase()
                     fill_curses_background(stdscr, curses.color_pair(4))
                     h, w = stdscr.getmaxyx()
-                    title = f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                    title = (
+                        f"TRAINING MODE | Episode {episode}/{max_episodes} | Eps {agent.epsilon:.3f}"
+                        if max_episodes
+                        else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
+                    )
                     controls = f"[↑/↓]: show every {render_every} eps    [s]: skip this episode    [q]: quit"
                     try:
                         stdscr.move(0, 0)
@@ -291,10 +347,19 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                 if done:
                     stats.append((episode, score, total_reward))
                     best_score = max(best_score, score)
+                    if should_render:
+                        try:
+                            flash_head(stdscr, board, board_x, board_y, curses.color_pair(4))
+                        except curses.error:
+                            pass
                     break
             if episode % 20 == 0:
                 avg_score = np.mean([s for _, s, _ in stats[-20:]])
-                summary = f"Episode {episode}/{episodes}: avg {avg_score:.2f}, best {best_score}, eps {agent.epsilon:.3f}"
+                summary = (
+                    f"Episode {episode}/{max_episodes}: avg {avg_score:.2f}, best {best_score}, eps {agent.epsilon:.3f}"
+                    if max_episodes
+                    else f"Episode {episode}: avg {avg_score:.2f}, best {best_score}, eps {agent.epsilon:.3f}"
+                )
                 _, w = stdscr.getmaxyx()
                 try:
                     stdscr.move(1, 0)
@@ -303,6 +368,7 @@ def curses_train(stdscr, agent, episodes=800, render_every=40, delay=0.05):
                     pass
                 stdscr.addstr(1, max(0, (w - len(summary)) // 2), summary[: w - 2], curses.color_pair(4))
                 stdscr.refresh()
+            episode += 1
     except KeyboardInterrupt:
         pass
     finally:
@@ -397,15 +463,17 @@ def curses_play(stdscr):
                     break
 
 
-def train(agent, episodes=800, render_every=40, delay=0.05):
+def train(agent, episodes=0, render_every=40, delay=0.05):
     episode = 0
     width, height = get_console_size()
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
     best_score = 0
     stats = []
+    max_episodes = None if episodes <= 0 else episodes
 
     try:
-        for episode in range(1, episodes + 1):
+        episode = 1
+        while max_episodes is None or episode <= max_episodes:
             state = game.reset()
             total_reward = 0.0
             step = 0
@@ -430,7 +498,13 @@ def train(agent, episodes=800, render_every=40, delay=0.05):
 
             if episode % 20 == 0:
                 avg_score = np.mean([s for _, s, _ in stats[-20:]])
-                print(f"Episode {episode}/{episodes}: avg score {avg_score:.2f}, best score {best_score}, eps {agent.epsilon:.3f}")
+                summary = (
+                    f"Episode {episode}/{max_episodes}: avg score {avg_score:.2f}, best score {best_score}, eps {agent.epsilon:.3f}"
+                    if max_episodes
+                    else f"Episode {episode}: avg score {avg_score:.2f}, best score {best_score}, eps {agent.epsilon:.3f}"
+                )
+                print(summary)
+            episode += 1
     except KeyboardInterrupt:
         print("\nTraining interrupted by user.")
     finally:
@@ -516,7 +590,7 @@ def play():
 def main():
     parser = argparse.ArgumentParser(description="RL Snake console app")
     parser.add_argument("mode", nargs="?", choices=["train", "play"], help="train the RL agent or play manually")
-    parser.add_argument("--episodes", type=int, default=800, help="number of training episodes")
+    parser.add_argument("--episodes", type=int, default=0, help="number of training episodes (0 = infinite)")
     parser.add_argument("--render-every", type=int, default=40, help="render every N episodes during training")
     parser.add_argument("--seed", type=int, default=None, help="random seed for reproducible training")
     parser.add_argument("--external", action="store_true", help=argparse.SUPPRESS)
@@ -568,7 +642,15 @@ def main():
 
     if args.mode == "train":
         agent = DQNAgent()
-        curses.wrapper(curses_train, agent, args.episodes, args.render_every)
+        start_episode = 1
+        meta = load_save_meta()
+        if meta and meta.get("episode") is not None:
+            try:
+                agent.load()
+                start_episode = meta["episode"] + 1
+            except Exception:
+                start_episode = 1
+        curses.wrapper(curses_train, agent, args.episodes, args.render_every, 0.05, start_episode)
     else:
         curses.wrapper(curses_play)
 
