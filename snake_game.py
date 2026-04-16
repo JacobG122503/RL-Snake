@@ -19,11 +19,15 @@ class SnakeGame:
         self.steps = 0
         self.score = 0
         self.alive = True
+        self.won = False
         self._place_apple()
         return self._get_state()
 
     def _place_apple(self):
         free_cells = [(x, y) for x in range(self.width) for y in range(self.height) if (x, y) not in self.snake]
+        if not free_cells:
+            self.apple = None
+            return
         self.apple = random.choice(free_cells)
 
     def step(self, action):
@@ -39,15 +43,17 @@ class SnakeGame:
 
         self.snake.appendleft(new_head)
         reward = 0.0
-        if new_head == self.apple:
+        if self.apple is not None and new_head == self.apple:
             self.score += 1
             reward = 1.0
             self._place_apple()
+            if self.apple is None:
+                self.won = True
         else:
             self.snake.pop()
 
         state = self._get_state()
-        done = not self.alive
+        done = not self.alive or self.won
         return state, reward, done, self.score
 
     def _choose_direction(self, action):
@@ -82,10 +88,13 @@ class SnakeGame:
         dir_down = 1.0 if self.direction == 2 else 0.0
         dir_left = 1.0 if self.direction == 3 else 0.0
 
-        apple_left = 1.0 if self.apple[0] < head_x else 0.0
-        apple_right = 1.0 if self.apple[0] > head_x else 0.0
-        apple_up = 1.0 if self.apple[1] < head_y else 0.0
-        apple_down = 1.0 if self.apple[1] > head_y else 0.0
+        if self.apple is None:
+            apple_left = apple_right = apple_up = apple_down = 0.0
+        else:
+            apple_left = 1.0 if self.apple[0] < head_x else 0.0
+            apple_right = 1.0 if self.apple[0] > head_x else 0.0
+            apple_up = 1.0 if self.apple[1] < head_y else 0.0
+            apple_down = 1.0 if self.apple[1] > head_y else 0.0
 
         return [
             danger_straight,
@@ -107,8 +116,9 @@ class SnakeGame:
             grid[y][x] = "S"
         head_x, head_y = self.snake[0]
         grid[head_y][head_x] = "H"
-        ax, ay = self.apple
-        grid[ay][ax] = "A"
+        if self.apple is not None:
+            ax, ay = self.apple
+            grid[ay][ax] = "A"
         return grid
 
     def render(self):

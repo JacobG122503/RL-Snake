@@ -232,6 +232,9 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
     max_episodes = None if episodes <= 0 else episodes
     episode = start_episode
     efficiency_mode = False
+    delay_step = 0.01
+    game_beaten = False
+    beat_score = width * height - 3
 
     try:
         status_shown = False
@@ -261,10 +264,10 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                         skip_current_episode_render = False
                         status_shown = False
                     if key in (curses.KEY_UP, 259):
-                        render_every = max(1, render_every - 1)
+                        delay = max(0.0, delay - delay_step)
                         status_shown = False
                     if key in (curses.KEY_DOWN, 258):
-                        render_every = min(999, render_every + 1)
+                        delay = min(1.0, delay + delay_step)
                         status_shown = False
 
                 if efficiency_mode:
@@ -293,7 +296,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                             if max_episodes
                             else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
                         )
-                        status = f"(skipped) [e]: efficiency mode    [q]: quit"
+                        status = f"(skipped) [↑/↓]: speed    [e]: efficiency mode    [q]: quit"
                         try:
                             stdscr.move(0, 0)
                             stdscr.clrtoeol()
@@ -325,7 +328,7 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                         if max_episodes
                         else f"TRAINING MODE | Episode {episode} | Eps {agent.epsilon:.3f}"
                     )
-                    controls = f"[e]: efficiency mode    [s]: skip this episode    [q]: quit"
+                    controls = f"[↑/↓]: speed    [e]: efficiency mode    [s]: skip episode    [q]: quit"
                     try:
                         stdscr.move(0, 0)
                         stdscr.clrtoeol()
@@ -376,6 +379,8 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                             flash_head(stdscr, board, board_x, board_y, curses.color_pair(4))
                         except curses.error:
                             pass
+                    if score >= beat_score:
+                        game_beaten = True
                     break
             if episode % 20 == 0:
                 avg_score = np.mean([s for _, s, _ in stats[-20:]])
@@ -392,6 +397,8 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                     pass
                 stdscr.addstr(1, max(0, (w - len(summary)) // 2), summary[: w - 2], curses.color_pair(4))
                 stdscr.refresh()
+            if game_beaten:
+                break
             episode += 1
     except KeyboardInterrupt:
         pass
