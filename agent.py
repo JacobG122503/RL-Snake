@@ -35,6 +35,11 @@ class DQNAgent:
         self.W2 = np.random.randn(hidden_size, self.action_size) * np.sqrt(2.0 / hidden_size)
         self.b2 = np.zeros(self.action_size)
 
+        self.best_W1 = None
+        self.best_b1 = None
+        self.best_W2 = None
+        self.best_b2 = None
+
     def _relu(self, x):
         return np.maximum(0, x)
 
@@ -95,17 +100,30 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def save(self, filename="dqn_snake.npz", episode=None, score=None):
+    def save(self, filename="dqn_snake.npz", episode=None, score=None, best_episode=None, best_score=None):
         save_data = {
             "W1": self.W1,
             "b1": self.b1,
             "W2": self.W2,
             "b2": self.b2,
+            "epsilon": np.float32(self.epsilon),
         }
+        if self.best_W1 is not None:
+            save_data["best_W1"] = self.best_W1
+        if self.best_b1 is not None:
+            save_data["best_b1"] = self.best_b1
+        if self.best_W2 is not None:
+            save_data["best_W2"] = self.best_W2
+        if self.best_b2 is not None:
+            save_data["best_b2"] = self.best_b2
         if episode is not None:
             save_data["episode"] = np.int32(episode)
         if score is not None:
             save_data["score"] = np.int32(score)
+        if best_episode is not None:
+            save_data["best_episode"] = np.int32(best_episode)
+        if best_score is not None:
+            save_data["best_score"] = np.int32(best_score)
         np.savez(filename, **save_data)
 
     def load(self, filename="dqn_snake.npz"):
@@ -114,3 +132,20 @@ class DQNAgent:
         self.b1 = data["b1"]
         self.W2 = data["W2"]
         self.b2 = data["b2"]
+        if "epsilon" in data:
+            self.epsilon = float(data["epsilon"])
+        if "best_W1" in data:
+            self.best_W1 = data["best_W1"]
+        if "best_b1" in data:
+            self.best_b1 = data["best_b1"]
+        if "best_W2" in data:
+            self.best_W2 = data["best_W2"]
+        if "best_b2" in data:
+            self.best_b2 = data["best_b2"]
+
+    def use_best_weights(self):
+        if self.best_W1 is not None and self.best_b1 is not None and self.best_W2 is not None and self.best_b2 is not None:
+            self.W1 = self.best_W1.copy()
+            self.b1 = self.best_b1.copy()
+            self.W2 = self.best_W2.copy()
+            self.b2 = self.best_b2.copy()

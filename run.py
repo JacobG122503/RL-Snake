@@ -130,6 +130,9 @@ def load_save_meta(filename="dqn_snake.npz"):
             return {
                 "episode": int(data["episode"]) if "episode" in data else None,
                 "score": int(data["score"]) if "score" in data else None,
+                "best_episode": int(data["best_episode"]) if "best_episode" in data else None,
+                "best_score": int(data["best_score"]) if "best_score" in data else None,
+                "epsilon": float(data["epsilon"]) if "epsilon" in data else None,
             }
     except Exception:
         return None
@@ -153,16 +156,20 @@ def curses_menu(stdscr):
     stdscr.bkgd(" ", curses.color_pair(1))
     stdscr.clear()
     meta = load_save_meta()
-    episode_text = f"episode {meta['episode']}" if meta and meta.get("episode") is not None else "no save"
+    best_episode_id = None
+    if meta:
+        best_episode_id = meta.get("best_episode") or meta.get("episode")
+    best_episode_text = f"ep {best_episode_id}" if best_episode_id is not None else "none"
+    continue_text = f"continue from ep {meta['episode'] + 1}" if meta and meta.get("episode") is not None else "start fresh"
     raw_lines = [
         "",
         "RL SNAKE",
         "",
         "1) Play",
-        "2) Train",
-        f"3) Clear save ({episode_text})",
+        f"2) Train ({continue_text})",
+        f"3) Play best ({best_episode_text})",
+        "4) Clear save",
         "",
-        "Press 1, 2, or 3 to choose.",
     ]
     inner_width = max(len(line) for line in raw_lines)
     box_width = inner_width + 4
@@ -173,7 +180,7 @@ def curses_menu(stdscr):
     for idx, raw in enumerate(raw_lines):
         padded = raw.center(inner_width)
         lines.append("# " + padded + " #")
-        if idx in (0, 2, 6):
+        if idx in (0, 2, 7):
             lines.append("#" + " " * (box_width - 2) + "#")
     lines.append("#" * box_width)
 
@@ -194,9 +201,7 @@ def curses_menu(stdscr):
                 stdscr.addstr(y, start_x, line, curses.color_pair(1))
             else:
                 inner = line[2:-2]
-                if idx == 2:
-                    text_color = curses.color_pair(3)
-                elif idx in (4, 5, 6):
+                if inner.strip() == "RL SNAKE":
                     text_color = curses.color_pair(2)
                 else:
                     text_color = curses.color_pair(1)
@@ -205,8 +210,34 @@ def curses_menu(stdscr):
                 stdscr.addstr(y, start_x + box_width - 2, " #", curses.color_pair(1))
         stdscr.refresh()
         key = stdscr.getch()
-        if key in (ord("1"), ord("2"), ord("3")):
+        if key in (ord("1"), ord("2")):
             return chr(key)
+
+        if key == ord("3") and meta and (meta.get("best_episode") is not None or meta.get("episode") is not None):
+            return "3"
+
+        if key == ord("4"):
+            confirmation = "Clear save? y/n"
+            try:
+                stdscr.move(h - 2, 0)
+                stdscr.clrtoeol()
+            except curses.error:
+                pass
+            stdscr.addstr(h - 2, 1, confirmation[: max(0, w - 2)], curses.color_pair(4))
+            stdscr.refresh()
+            while True:
+                conf_key = stdscr.getch()
+                if conf_key in (ord("y"), ord("Y")):
+                    return "4"
+                if conf_key in (ord("n"), ord("N"), ord("q")):
+                    break
+            try:
+                stdscr.move(h - 2, 0)
+                stdscr.clrtoeol()
+            except curses.error:
+                pass
+            stdscr.refresh()
+
         if key == ord("q"):
             return "q"
 
@@ -227,7 +258,16 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
     width = max(20, w - 4)
     height = max(12, h - 6)
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
+    existing_meta = load_save_meta()
     best_score = 0
+    best_episode = None
+    if existing_meta:
+        if existing_meta.get("best_score") is not None:
+            best_score = existing_meta["best_score"]
+            best_episode = existing_meta.get("best_episode")
+        elif existing_meta.get("score") is not None:
+            best_score = existing_meta["score"]
+            best_episode = existing_meta.get("episode")
     stats = []
     max_episodes = None if episodes <= 0 else episodes
     episode = start_episode
@@ -373,7 +413,13 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
                     time.sleep(delay)
                 if done:
                     stats.append((episode, score, total_reward))
-                    best_score = max(best_score, score)
+                    if score > best_score:
+                        best_score = score
+                        best_episode = episode
+                        agent.best_W1 = agent.W1.copy()
+                        agent.best_b1 = agent.b1.copy()
+                        agent.best_W2 = agent.W2.copy()
+                        agent.best_b2 = agent.b2.copy()
                     if should_render:
                         try:
                             flash_head(stdscr, board, board_x, board_y, curses.color_pair(4))
@@ -403,10 +449,10 @@ def curses_train(stdscr, agent, episodes=0, render_every=40, delay=0.05, start_e
     except KeyboardInterrupt:
         pass
     finally:
-        agent.save(episode=episode)
+        agent.save(episode=episode, best_score=best_score, best_episode=best_episode)
 
 
-def curses_play(stdscr):
+def curses_play(stdscr, agent=None, title="RL SNAKE - q to quit"):
     curses.curs_set(0)
     curses.start_color()
     curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
@@ -417,6 +463,7 @@ def curses_play(stdscr):
     stdscr.nodelay(True)
     stdscr.timeout(100)
 
+    play_delay = 0.05
     play_height, play_width = stdscr.getmaxyx()
     game_width = max(20, play_width - 4)
     game_height = max(12, play_height - 6)
@@ -424,13 +471,14 @@ def curses_play(stdscr):
     state = game.reset()
     score = 0
     action = 0
+    auto_play = agent is not None
 
     while True:
         play_height, play_width = stdscr.getmaxyx()
         stdscr.bkgdset(" ", curses.color_pair(4))
         stdscr.erase()
         fill_curses_background(stdscr, curses.color_pair(4))
-        title = "RL SNAKE - q to quit"
+        title_text = title
         try:
             stdscr.move(0, 0)
             stdscr.clrtoeol()
@@ -438,8 +486,10 @@ def curses_play(stdscr):
             stdscr.clrtoeol()
         except curses.error:
             pass
-        stdscr.addstr(0, max(0, (play_width - len(title)) // 2), title, curses.color_pair(3))
+        stdscr.addstr(0, max(0, (play_width - len(title_text)) // 2), title_text, curses.color_pair(3))
+        controls_text = "[↑/↓]: speed    [q]: quit"
         stdscr.addstr(1, 1, f"Score: {score}"[: max(0, play_width - 2)], curses.color_pair(4))
+        stdscr.addstr(2, 1, controls_text[: max(0, play_width - 2)], curses.color_pair(5))
         board = game.render_cells()
         board_h = len(board)
         board_w = len(board[0]) if board_h else 0
@@ -474,8 +524,15 @@ def curses_play(stdscr):
 
         if key == ord("q"):
             break
-        if key in KEY_BINDINGS:
+        if key in (curses.KEY_UP, 259):
+            play_delay = max(0.0, play_delay - 0.02)
+        if key in (curses.KEY_DOWN, 258):
+            play_delay = min(1.0, play_delay + 0.02)
+        if not auto_play and key in KEY_BINDINGS:
             action = KEY_BINDINGS[key]
+
+        if auto_play:
+            action = agent.act(state)
 
         _, _, done, score = game.play_step(action)
         if done:
@@ -492,13 +549,24 @@ def curses_play(stdscr):
                     score = 0
                     action = 0
                     break
+        else:
+            time.sleep(play_delay)
 
 
 def train(agent, episodes=0, render_every=40, delay=0.05):
     episode = 0
     width, height = get_console_size()
     game = SnakeGame(width=width, height=height, max_steps=width * height * 4)
+    existing_meta = load_save_meta()
     best_score = 0
+    best_episode = None
+    if existing_meta:
+        if existing_meta.get("best_score") is not None:
+            best_score = existing_meta["best_score"]
+            best_episode = existing_meta.get("best_episode")
+        elif existing_meta.get("score") is not None:
+            best_score = existing_meta["score"]
+            best_episode = existing_meta.get("episode")
     stats = []
     max_episodes = None if episodes <= 0 else episodes
 
@@ -524,7 +592,9 @@ def train(agent, episodes=0, render_every=40, delay=0.05):
 
                 if done:
                     stats.append((episode, score, total_reward))
-                    best_score = max(best_score, score)
+                    if score > best_score:
+                        best_score = score
+                        best_episode = episode
                     break
 
             if episode % 20 == 0:
@@ -540,7 +610,7 @@ def train(agent, episodes=0, render_every=40, delay=0.05):
         print("\nTraining interrupted by user.")
     finally:
         print("Saving weights to dqn_snake.npz")
-        agent.save(episode=episode)
+        agent.save(episode=episode, best_score=best_score, best_episode=best_episode)
 
 
 def play():
@@ -668,6 +738,8 @@ def main():
         elif selection == "2":
             args.mode = "train"
         elif selection == "3":
+            args.mode = "play_best"
+        elif selection == "4":
             clear_save()
             return main()
 
@@ -682,6 +754,20 @@ def main():
             except Exception:
                 start_episode = 1
         curses.wrapper(curses_train, agent, args.episodes, args.render_every, 0.05, start_episode)
+    elif args.mode == "play_best":
+        meta = load_save_meta()
+        if meta and meta.get("best_episode") is not None:
+            agent = DQNAgent()
+            try:
+                agent.load()
+                agent.use_best_weights()
+                agent.epsilon = 0.0
+                title = f"BEST EPISODE {meta['best_episode']} - SCORE {meta.get('best_score', 'n/a')}"
+                curses.wrapper(curses_play, agent, title)
+            except Exception:
+                curses.wrapper(curses_play, None, "RL SNAKE - q to quit")
+        else:
+            curses.wrapper(curses_play, None, "RL SNAKE - q to quit")
     else:
         curses.wrapper(curses_play)
 
